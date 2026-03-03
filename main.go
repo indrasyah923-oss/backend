@@ -20,7 +20,7 @@ import (
 
 var (
 	DB        *sql.DB
-	JWTSecret = []byte("GANTI_SECRET_KEY_INI_DENGAN_STRING_RANDOM")
+	JWTSecret []byte
 )
 
 type User struct {
@@ -197,6 +197,14 @@ func seedMasterAdmin() {
 	DB.Exec(`INSERT INTO users (username,email,password,role) VALUES (?,?,?,?)`,
 		"masteradmin", "master@portfolio.com", string(hash), "master_admin")
 	log.Println("✅ Master admin dibuat: masteradmin / masteradmin123")
+}
+
+func getEnvOrFatal(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		log.Fatalf("❌ Environment variable %s wajib diisi", key)
+	}
+	return v
 }
 
 func getEnv(key, fallback string) string {
@@ -663,6 +671,7 @@ func randomString(n int) string {
 }
 
 func main() {
+	JWTSecret = []byte(getEnvOrFatal("JWT_SECRET"))
 	initDB()
 
 	r := gin.Default()
