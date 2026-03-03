@@ -70,20 +70,35 @@ func sendResetEmail(toEmail, resetToken, frontendURL string) error {
 	auth      := smtp.PlainAuth("", username, password, host)
 	resetLink := fmt.Sprintf("%s/forgot-password?token=%s", frontendURL, resetToken)
 	subject   := "Reset Password Portfolio"
-	body      := fmt.Sprintf(`<!DOCTYPE html><html><body style="font-family:Arial;background:#0f172a;color:#e2e8f0;padding:20px">
-<div style="max-width:480px;margin:0 auto;background:#1e293b;border-radius:16px;padding:32px;border:1px solid #334155">
-<h2 style="color:#a78bfa">🔐 Reset Password</h2>
-<p style="color:#94a3b8">Kamu menerima email ini karena ada permintaan reset password.</p>
-<a href="%s" style="display:inline-block;padding:14px 28px;background:linear-gradient(135deg,#7c3aed,#db2777);color:white;text-decoration:none;border-radius:10px;font-weight:bold;margin:16px 0">Reset Password</a>
-<p style="color:#94a3b8;font-size:13px">Atau copy link: %s</p>
-<p style="color:#94a3b8;font-size:13px"><strong>Link berlaku 1 jam.</strong> Abaikan jika tidak merasa meminta reset.</p>
-</div></body></html>`, resetLink, resetLink)
 
-	msg := fmt.Sprintf("To: %s\nFrom: Portfolio <%s>\nSubject: %s\nMIME-Version: 1.0\nContent-Type: text/html; charset=UTF-8\n\n%s",
-		toEmail, from, subject, body)
+	body := "<html><body style=\"font-family:Arial,sans-serif;background:#030712;margin:0;padding:32px\">" +
+		"<div style=\"max-width:480px;margin:0 auto;background:#0f172a;border-radius:20px;padding:40px;border:1px solid #1e293b\">" +
+		"<div style=\"text-align:center;margin-bottom:32px\">" +
+		"<h1 style=\"margin:0;font-size:28px;font-weight:900;background:linear-gradient(135deg,#a78bfa,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent\">Portfolio</h1>" +
+		"</div>" +
+		"<h2 style=\"color:#e2e8f0;font-size:20px;margin:0 0 12px\">🔐 Reset Password</h2>" +
+		"<p style=\"color:#94a3b8;font-size:14px;line-height:1.6;margin:0 0 28px\">Kamu menerima email ini karena ada permintaan reset password untuk akun kamu. Klik tombol di bawah untuk membuat password baru.</p>" +
+		"<div style=\"text-align:center;margin:0 0 28px\">" +
+		"<a href=\"" + resetLink + "\" style=\"display:inline-block;padding:14px 32px;background:#1e1e1e;color:#e2e8f0;text-decoration:none;border-radius:6px;font-weight:500;font-size:14px;letter-spacing:0.2px;border:1px solid #3d3d3d;font-family:monospace\">Reset Password Sekarang</a>" +
+		"</div>" +
+		"<div style=\"background:#1e293b;border-radius:10px;padding:14px 16px;margin-bottom:24px\">" +
+		"<p style=\"color:#64748b;font-size:11px;margin:0 0 6px\">Atau copy link ini ke browser:</p>" +
+		"<p style=\"color:#a78bfa;font-size:12px;word-break:break-all;margin:0\">" + resetLink + "</p>" +
+		"</div>" +
+		"<p style=\"color:#475569;font-size:12px;text-align:center;margin:0\"><strong style=\"color:#94a3b8\">Link berlaku selama 1 jam.</strong><br>Abaikan email ini jika kamu tidak merasa meminta reset password.</p>" +
+		"</div></body></html>"
+
+	headers := "To: " + toEmail + "\r\n" +
+		"From: Portfolio <" + from + ">\r\n" +
+		"Subject: " + subject + "\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/html; charset=UTF-8\r\n" +
+		"\r\n"
+
+	msg := []byte(headers + body)
 
 	addr := fmt.Sprintf("%s:%s", host, port)
-	if err := smtp.SendMail(addr, auth, from, []string{toEmail}, []byte(msg)); err != nil {
+	if err := smtp.SendMail(addr, auth, from, []string{toEmail}, msg); err != nil {
 		log.Printf("❌ Gagal kirim email ke %s: %v", toEmail, err)
 		return err
 	}
@@ -652,7 +667,7 @@ func main() {
 
 	r := gin.Default()
 	// CORS: baca dari env, fallback ke localhost untuk development
-	allowedOrigins := getEnv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000,https://portofolio-CRUD.github.io")
+	allowedOrigins := getEnv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000")
 	origins := strings.Split(allowedOrigins, ",")
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     origins,
