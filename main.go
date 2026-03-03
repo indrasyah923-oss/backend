@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"crypto/tls"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
@@ -67,7 +69,6 @@ func sendResetEmail(toEmail, resetToken, frontendURL string) error {
 		return nil
 	}
 
-	auth      := smtp.PlainAuth("", username, password, host)
 	resetLink := fmt.Sprintf("%s/forgot-password?token=%s", frontendURL, resetToken)
 	subject   := "Reset Password Portfolio"
 
@@ -98,9 +99,35 @@ func sendResetEmail(toEmail, resetToken, frontendURL string) error {
 	msg := []byte(headers + body)
 
 	addr := fmt.Sprintf("%s:%s", host, port)
-	if err := smtp.SendMail(addr, auth, from, []string{toEmail}, msg); err != nil {
-		log.Printf("❌ Gagal kirim email ke %s: %v", toEmail, err)
-		return err
+	var sendErr error
+	if port == "465" {
+		// SSL/TLS langsung
+		tlsConf := &tls.Config{ServerName: host}
+		conn, err := tls.Dial("tcp", addr, tlsConf)
+		if err != nil {
+			log.Printf("❌ Gagal koneksi TLS ke %s: %v", addr, err)
+			return err
+		}
+		defer conn.Close()
+		client, err := smtp.NewClient(conn, host)
+		if err != nil { return err }
+		auth := smtp.PlainAuth("", username, password, host)
+		if err = client.Auth(auth); err != nil { return err }
+		if err = client.Mail(from); err != nil { return err }
+		if err = client.Rcpt(toEmail); err != nil { return err }
+		w, err := client.Data()
+		if err != nil { return err }
+		_, sendErr = w.Write(msg)
+		w.Close()
+		client.Quit()
+	} else {
+		// STARTTLS (587) atau plaintext
+		auth := smtp.PlainAuth("", username, password, host)
+		sendErr = smtp.SendMail(addr, auth, from, []string{toEmail}, msg)
+	}
+	if sendErr != nil {
+		log.Printf("❌ Gagal kirim email ke %s: %v", toEmail, sendErr)
+		return sendErr
 	}
 	log.Printf("✅ Email reset terkirim ke %s", toEmail)
 	return nil
