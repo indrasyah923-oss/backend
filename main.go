@@ -772,7 +772,7 @@ PENTING: Balas HANYA dengan JSON array tanpa teks tambahan, tanpa markdown, tanp
 	}
 	reqBytes, _ := json.Marshal(reqBody)
 
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=%s", apiKey)
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=%s", apiKey)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(reqBytes))
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Gagal membuat request"})
