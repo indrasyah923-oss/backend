@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"crypto/tls"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -11,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"crypto/tls"
-
+	
+    "github.com/joho/godotenv"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
@@ -697,10 +701,132 @@ func randomString(n int) string {
 	return string(b)
 }
 
+func GenerateArticle(c *gin.Context) {
+	var body struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Language    string `json:"language"` // "id" atau "en"
+		Style       string `json:"style"`    // "formal", "santai", "teknis"
+		Length      string `json:"length"`   // "pendek", "sedang", "panjang"
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.Title == "" {
+		c.JSON(400, gin.H{"error": "Judul wajib diisi"})
+		return
+	}
+
+	apiKey := getEnv("ANTHROPIC_API_KEY", "")
+	if apiKey == "" {
+		c.JSON(500, gin.H{"error": "Anthropic API key belum dikonfigurasi"})
+		return
+	}
+
+	// Default values
+	if body.Language == "" { body.Language = "id" }
+	if body.Style == ""    { body.Style = "santai" }
+	if body.Length == ""   { body.Length = "sedang" }
+
+	// Tentukan jumlah paragraf berdasarkan panjang
+	paragrafCount := "3"
+	if body.Length == "pendek" { paragrafCount = "2" }
+	if body.Length == "panjang" { paragrafCount = "5" }
+
+	lang := "Bahasa Indonesia"
+	if body.Language == "en" { lang = "English" }
+
+	prompt := fmt.Sprintf(`Tulis artikel blog dalam %s dengan ketentuan:
+- Judul: %s
+- Deskripsi/topik: %s
+- Gaya bahasa: %s
+- Panjang: %s (%s paragraf per bagian)
+
+Struktur artikel:
+1. Satu heading utama
+2. 2-3 subheading
+3. Setiap subheading diikuti %s paragraf
+4. Satu quote yang relevan di tengah artikel
+5. Satu list berisi 3-5 poin kesimpulan di akhir
+
+PENTING: Balas HANYA dengan JSON array tanpa teks tambahan, tanpa markdown, tanpa backtick. Format:
+[
+  {"type":"heading","text":"..."},
+  {"type":"paragraph","text":"..."},
+  {"type":"subheading","text":"..."},
+  {"type":"paragraph","text":"..."},
+  {"type":"quote","text":"...","author":"..."},
+  {"type":"subheading","text":"..."},
+  {"type":"paragraph","text":"..."},
+  {"type":"list","items":["...","...","..."]}
+]`, lang, body.Title, body.Description, body.Style, body.Length, paragrafCount, paragrafCount)
+
+	// Buat request ke Anthropic API
+	reqBody := map[string]interface{}{
+		"model":      "claude-haiku-4-5-20251001",
+		"max_tokens": 2048,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+	}
+	reqBytes, _ := json.Marshal(reqBody)
+
+	req, err := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(reqBytes))
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Gagal membuat request"})
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Gagal menghubungi Anthropic API"})
+		return
+	}
+	defer resp.Body.Close()
+
+	respBytes, _ := io.ReadAll(resp.Body)
+
+	var anthropicResp struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(respBytes, &anthropicResp); err != nil {
+		c.JSON(500, gin.H{"error": "Gagal parse response AI"})
+		return
+	}
+	if anthropicResp.Error.Message != "" {
+		c.JSON(500, gin.H{"error": anthropicResp.Error.Message})
+		return
+	}
+	if len(anthropicResp.Content) == 0 {
+		c.JSON(500, gin.H{"error": "AI tidak menghasilkan konten"})
+		return
+	}
+
+	// Ambil teks JSON dari response
+	rawText := strings.TrimSpace(anthropicResp.Content[0].Text)
+
+	// Validasi bahwa response adalah JSON array yang valid
+	var blocks []interface{}
+	if err := json.Unmarshal([]byte(rawText), &blocks); err != nil {
+		c.JSON(500, gin.H{"error": "AI tidak menghasilkan format yang valid, coba lagi"})
+		return
+	}
+
+	c.JSON(200, gin.H{"blocks": blocks})
+}
+
 func main() {
+	godotenv.Load()
 	JWTSecret = []byte(getEnvOrFatal("JWT_SECRET"))
 	initDB()
-
+	 // baca .env
 	r := gin.Default()
 	// CORS: baca dari env, fallback ke localhost untuk development
 	allowedOrigins := getEnv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000")
@@ -735,6 +861,7 @@ func main() {
 	adminOnly.PUT("/blogs/:id", UpdateBlog)
 	adminOnly.DELETE("/blogs/:id", DeleteBlog)
 	adminOnly.PATCH("/blogs/home", SetHomeBlogs)
+	adminOnly.POST("/generate", GenerateArticle)
 
 	// ── Master Admin only
 	masterOnly := api.Group("/master")
