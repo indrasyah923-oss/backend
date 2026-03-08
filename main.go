@@ -766,7 +766,7 @@ PENTING: Balas HANYA dengan JSON array tanpa teks tambahan, tanpa markdown, tanp
 			},
 		},
 		"generationConfig": map[string]interface{}{
-			"maxOutputTokens": 2048,
+			"maxOutputTokens": 4096,
 			"temperature":     0.7,
 			"responseMimeType": "application/json",
 		},
