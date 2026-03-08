@@ -15,8 +15,6 @@ import (
 	"strings"
 	"time"
 
-	
-    "github.com/joho/godotenv"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
@@ -716,7 +714,7 @@ func GenerateArticle(c *gin.Context) {
 
 	apiKey := getEnv("ANTHROPIC_API_KEY", "")
 	if apiKey == "" {
-		c.JSON(500, gin.H{"error": "Anthropic API key belum dikonfigurasi"})
+		c.JSON(500, gin.H{"error": "API key belum dikonfigurasi"})
 		return
 	}
 
@@ -758,59 +756,73 @@ PENTING: Balas HANYA dengan JSON array tanpa teks tambahan, tanpa markdown, tanp
   {"type":"list","items":["...","...","..."]}
 ]`, lang, body.Title, body.Description, body.Style, body.Length, paragrafCount, paragrafCount)
 
-	// Buat request ke Anthropic API
+	// Buat request ke Gemini API
 	reqBody := map[string]interface{}{
-		"model":      "claude-haiku-4-5-20251001",
-		"max_tokens": 2048,
-		"messages": []map[string]string{
-			{"role": "user", "content": prompt},
+		"contents": []map[string]interface{}{
+			{
+				"parts": []map[string]string{
+					{"text": prompt},
+				},
+			},
+		},
+		"generationConfig": map[string]interface{}{
+			"maxOutputTokens": 2048,
+			"temperature":     0.7,
 		},
 	}
 	reqBytes, _ := json.Marshal(reqBody)
 
-	req, err := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(reqBytes))
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=%s", apiKey)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(reqBytes))
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Gagal membuat request"})
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Gagal menghubungi Anthropic API"})
+		c.JSON(500, gin.H{"error": "Gagal menghubungi Gemini API"})
 		return
 	}
 	defer resp.Body.Close()
 
 	respBytes, _ := io.ReadAll(resp.Body)
 
-	var anthropicResp struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
+	var geminiResp struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
 		Error struct {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(respBytes, &anthropicResp); err != nil {
+	if err := json.Unmarshal(respBytes, &geminiResp); err != nil {
 		c.JSON(500, gin.H{"error": "Gagal parse response AI"})
 		return
 	}
-	if anthropicResp.Error.Message != "" {
-		c.JSON(500, gin.H{"error": anthropicResp.Error.Message})
+	if geminiResp.Error.Message != "" {
+		c.JSON(500, gin.H{"error": geminiResp.Error.Message})
 		return
 	}
-	if len(anthropicResp.Content) == 0 {
+	if len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
 		c.JSON(500, gin.H{"error": "AI tidak menghasilkan konten"})
 		return
 	}
 
 	// Ambil teks JSON dari response
-	rawText := strings.TrimSpace(anthropicResp.Content[0].Text)
+	rawText := strings.TrimSpace(geminiResp.Candidates[0].Content.Parts[0].Text)
+
+	// Bersihkan kalau ada backtick dari Gemini
+	rawText = strings.TrimPrefix(rawText, "```json")
+	rawText = strings.TrimPrefix(rawText, "```")
+	rawText = strings.TrimSuffix(rawText, "```")
+	rawText = strings.TrimSpace(rawText)
 
 	// Validasi bahwa response adalah JSON array yang valid
 	var blocks []interface{}
@@ -823,10 +835,9 @@ PENTING: Balas HANYA dengan JSON array tanpa teks tambahan, tanpa markdown, tanp
 }
 
 func main() {
-	godotenv.Load()
 	JWTSecret = []byte(getEnvOrFatal("JWT_SECRET"))
 	initDB()
-	 // baca .env
+
 	r := gin.Default()
 	// CORS: baca dari env, fallback ke localhost untuk development
 	allowedOrigins := getEnv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000")
