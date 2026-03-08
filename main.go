@@ -820,9 +820,17 @@ PENTING: Balas HANYA dengan JSON array tanpa teks tambahan, tanpa markdown, tanp
 
 	// Bersihkan kalau ada backtick dari Gemini
 	rawText = strings.TrimPrefix(rawText, "```json")
+	rawText = strings.TrimPrefix(rawText, "```JSON")
 	rawText = strings.TrimPrefix(rawText, "```")
 	rawText = strings.TrimSuffix(rawText, "```")
 	rawText = strings.TrimSpace(rawText)
+
+	// Cari JSON array dari dalam teks (kalau ada teks sebelum/sesudah [])
+	start := strings.Index(rawText, "[")
+	end   := strings.LastIndex(rawText, "]")
+	if start != -1 && end != -1 && end > start {
+		rawText = rawText[start : end+1]
+	}
 
 	// Validasi bahwa response adalah JSON array yang valid
 	var blocks []interface{}
